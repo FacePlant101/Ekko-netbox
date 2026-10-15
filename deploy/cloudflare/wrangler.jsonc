@@ -1,0 +1,72 @@
+// Cloudflare Worker + Containers configuration for NetBox.
+// Run wrangler from this directory: `npx wrangler deploy`.
+// See PLAN.md for the architecture and the list of secrets to create.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "netbox",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+
+  "observability": {
+    "enabled": true
+  },
+
+  // Static files collected by `python manage.py collectstatic` (run `npm run collectstatic`
+  // or build the image first). The Worker rewrites /static/<path> to /<path> before
+  // handing off to this binding, so gunicorn never serves static files.
+  "assets": {
+    "directory": "../../netbox/static",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "not_found_handling": "none"
+  },
+
+  // Both classes use the same image; NETBOX_ROLE picks the process at start.
+  // The Dockerfile expects the repository root as build context.
+  "containers": [
+    {
+      "class_name": "NetBoxWeb",
+      "image": "./Dockerfile",
+      "image_build_context": "../..",
+      "instance_type": "standard-1",
+      "max_instances": 1
+    },
+    {
+      "class_name": "NetBoxWorker",
+      "image": "./Dockerfile",
+      "image_build_context": "../..",
+      "instance_type": "basic",
+      "max_instances": 1
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "NETBOX_WEB", "class_name": "NetBoxWeb" },
+      { "name": "NETBOX_WORKER", "class_name": "NetBoxWorker" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["NetBoxWeb", "NetBoxWorker"] }
+  ],
+
+  // Keeps the RQ worker alive (and restarts it after a host restart).
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+
+  // Non-secret configuration forwarded into the containers. Secrets are created with
+  // `wrangler secret put <NAME>`:
+  //   SECRET_KEY, DATABASE_URL, REDIS_TASKS_URL, REDIS_CACHE_URL,
+  //   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, API_TOKEN_PEPPERS (optional)
+  "vars": {
+    "ALLOWED_HOSTS": "netbox.example.com",
+    "CSRF_TRUSTED_ORIGINS": "https://netbox.example.com",
+    "R2_BUCKET": "netbox-media",
+    "R2_ENDPOINT": "https://<ACCOUNT_ID>.r2.cloudflarestorage.com",
+    "TIME_ZONE": "UTC",
+    // "true" keeps the web container warm from the cron trigger as well, trading
+    // cost for no cold starts.
+    "WEB_ALWAYS_ON": "false"
+  }
+}

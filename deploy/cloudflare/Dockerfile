@@ -1,0 +1,89 @@
+# syntax=docker/dockerfile:1
+# NetBox image for Cloudflare Containers. Build from the repository root:
+#   docker build --platform linux/amd64 -f deploy/cloudflare/Dockerfile -t netbox-cf .
+# Cloudflare only runs linux/amd64 images.
+
+ARG PYTHON_VERSION=3.12
+
+############################
+# Builder
+############################
+FROM python:${PYTHON_VERSION}-slim-bookworm AS builder
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        libpq-dev \
+        libffi-dev \
+        libssl-dev \
+        libxml2-dev \
+        libxslt1-dev \
+        libjpeg-dev \
+        zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /opt/netbox
+COPY requirements.txt ./
+# boto3 backs django-storages' S3 backend for R2 (media + custom scripts).
+RUN pip install --upgrade pip wheel \
+    && pip install -r requirements.txt boto3
+
+COPY netbox/ ./netbox/
+COPY deploy/cloudflare/configuration.py ./netbox/netbox/configuration.py
+
+# Collect static files with a throwaway configuration. gunicorn does not serve
+# them (DEBUG=False); the Worker serves /static/ from Workers Static Assets built
+# from the same output, both in production and under wrangler dev.
+RUN SECRET_KEY=build-only-placeholder-not-a-secret-0123456789abcdefghijklmnopqrstuvwxyz \
+    REDIS_TASKS_URL=redis://localhost:6379/0 \
+    REDIS_CACHE_URL=redis://localhost:6379/1 \
+    DB_HOST=localhost \
+    python netbox/manage.py collectstatic --no-input
+
+############################
+# Runtime
+############################
+FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    NETBOX_ROLE=web \
+    PORT=8001
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpq5 \
+        libxml2 \
+        libxslt1.1 \
+        libjpeg62-turbo \
+        zlib1g \
+        ca-certificates \
+        curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 999 netbox \
+    && useradd --system --uid 999 --gid netbox --home-dir /opt/netbox --shell /usr/sbin/nologin netbox
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder --chown=netbox:netbox /opt/netbox/netbox /opt/netbox/netbox
+COPY --chown=netbox:netbox deploy/cloudflare/gunicorn_config.py /opt/netbox/gunicorn_config.py
+COPY --chown=netbox:netbox deploy/cloudflare/entrypoint.sh /opt/netbox/entrypoint.sh
+
+# Writable locations for the filesystem fallbacks (local testing without R2).
+RUN mkdir -p /opt/netbox/netbox/media /opt/netbox/netbox/scripts /opt/netbox/netbox/reports \
+    && chown -R netbox:netbox /opt/netbox/netbox/media /opt/netbox/netbox/scripts /opt/netbox/netbox/reports
+
+USER netbox
+WORKDIR /opt/netbox/netbox
+
+EXPOSE 8001
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+    CMD curl -fsS "http://127.0.0.1:${PORT}/login/" > /dev/null || exit 1
+
+ENTRYPOINT ["/opt/netbox/entrypoint.sh"]
