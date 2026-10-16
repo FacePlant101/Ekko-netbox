@@ -10,5 +10,19 @@ echo "[web] applying database migrations"
 python manage.py migrate --no-input
 python manage.py remove_stale_contenttypes --no-input
 python manage.py reindex --lazy
+# Optional bootstrap of the first admin account (Worker secrets NETBOX_SUPERUSER_*).
+# Idempotent: existing users are left untouched, so the secrets can stay set.
+if [ -n "${NETBOX_SUPERUSER_PASSWORD:-}" ]; then
+    python manage.py shell -c "
+import os
+from users.models import User
+name = os.environ.get('NETBOX_SUPERUSER_NAME', 'admin')
+if not User.objects.filter(username=name).exists():
+    User.objects.create_superuser(name, os.environ.get('NETBOX_SUPERUSER_EMAIL', ''), os.environ['NETBOX_SUPERUSER_PASSWORD'])
+    print(f'[web] created superuser {name}')
+else:
+    print(f'[web] superuser {name} already exists')
+"
+fi
 echo "[web] starting gunicorn"
 exec gunicorn -c /opt/netbox/gunicorn_config.py netbox.wsgi

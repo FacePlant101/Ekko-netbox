@@ -230,6 +230,28 @@ Secrets (`wrangler secret put`): `SECRET_KEY`, `DATABASE_URL`, `REDIS_TASKS_URL`
 - Secrets are read from `env` and passed as process environment; a changed secret
   takes effect on the next container start.
 
+### First admin account
+
+Set the Worker secrets `NETBOX_SUPERUSER_NAME`, `NETBOX_SUPERUSER_EMAIL` and
+`NETBOX_SUPERUSER_PASSWORD`; `bin/web.sh` creates that superuser after
+migrations if it does not exist yet. The secrets can be deleted afterwards or
+left in place (existing users are never modified).
+
+### Deploying by hand
+
+```
+cd deploy/cloudflare
+npm ci
+./collectstatic.sh                         # Workers Static Assets input
+npx wrangler secret put SECRET_KEY         # once; 50+ random characters
+npx wrangler secret put API_TOKEN_PEPPERS  # once; "1=<50+ random characters>"
+npx wrangler deploy --containers-rollout immediate
+```
+
+A rollout replaces the running container: SIGTERM archives the last WAL
+segment, the new instance restores from R2. Expect one to two minutes of
+unavailability per deploy.
+
 ## 3. Rollout plan
 
 ### Phase 0: prerequisites (half a day)

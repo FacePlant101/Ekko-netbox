@@ -21,6 +21,10 @@ declare global {
   interface Env {
     SECRET_KEY: string;
     API_TOKEN_PEPPERS?: string;
+    // Optional first-admin bootstrap, applied idempotently by bin/web.sh.
+    NETBOX_SUPERUSER_NAME?: string;
+    NETBOX_SUPERUSER_EMAIL?: string;
+    NETBOX_SUPERUSER_PASSWORD?: string;
     // Only used by the external-database roles (NETBOX_ROLE=web|worker).
     DATABASE_URL?: string;
     REDIS_TASKS_URL?: string;
@@ -43,6 +47,9 @@ const FORWARDED_ENV = [
   "TIME_ZONE",
   "NETBOX_ROLE",
   "BACKUP_INTERVAL_SECONDS",
+  "NETBOX_SUPERUSER_NAME",
+  "NETBOX_SUPERUSER_EMAIL",
+  "NETBOX_SUPERUSER_PASSWORD",
   "DATABASE_URL",
   "REDIS_TASKS_URL",
   "REDIS_CACHE_URL",
