@@ -1,0 +1,76 @@
+// Cloudflare Worker + Containers configuration for NetBox.
+// Run wrangler from this directory: `npx wrangler deploy`.
+// See PLAN.md for the architecture and the list of secrets to create.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "netbox",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+
+  "observability": {
+    "enabled": true
+  },
+
+  // Public hostname. Wrangler creates the DNS record and certificate in the zone;
+  // the hostname must not already have A/AAAA/CNAME records.
+  "routes": [
+    { "pattern": "netbox.lydfirmaetekko.no", "custom_domain": true }
+  ],
+  "workers_dev": false,
+
+  // Static files collected by `python manage.py collectstatic` (run `npm run collectstatic`
+  // or build the image first). The Worker rewrites /static/<path> to /<path> before
+  // handing off to this binding, so gunicorn never serves static files.
+  "assets": {
+    "directory": "../../netbox/static",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "not_found_handling": "none"
+  },
+
+  // One container runs the whole stack (Postgres, Redis, gunicorn, rqworker).
+  // The Dockerfile expects the repository root as build context.
+  "containers": [
+    {
+      "class_name": "NetBox",
+      "image": "./Dockerfile",
+      "image_build_context": "../..",
+      "instance_type": "standard-2",
+      "max_instances": 1
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "NETBOX", "class_name": "NetBox" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["NetBox"] }
+  ],
+
+  // Postgres WAL archive and base backups, written through the Worker's
+  // outbound handler (the container has no S3 credentials).
+  "r2_buckets": [
+    { "binding": "BACKUPS", "bucket_name": "netbox-media" }
+  ],
+
+  // Keeps the container running: it hosts the database, so it should not sleep.
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+
+  // Non-secret configuration forwarded into the container. Secrets are created with
+  // `wrangler secret put <NAME>`: SECRET_KEY and API_TOKEN_PEPPERS. (DATABASE_URL and
+  // the Redis URLs are only needed for the external-database roles.)
+  "vars": {
+    "ALLOWED_HOSTS": "netbox.lydfirmaetekko.no,netbox.aleksander-vassdal.workers.dev",
+    "CSRF_TRUSTED_ORIGINS": "https://netbox.lydfirmaetekko.no,https://netbox.aleksander-vassdal.workers.dev",
+    "NETBOX_ROLE": "allinone",
+    // Plugins installed by deploy/cloudflare/plugin_requirements.txt.
+    "PLUGINS": "netbox_documents,netbox_topology_views,netbox_floorplan,netbox_interface_synchronization",
+    // Base backup cadence; WAL is archived at least every 60 s regardless.
+    "BACKUP_INTERVAL_SECONDS": "21600",
+    "TIME_ZONE": "Europe/Oslo"
+  }
+}

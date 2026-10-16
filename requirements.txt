@@ -31,6 +31,8 @@ netaddr==1.3.0
 nh3==0.3.5
 Pillow==12.2.0
 psycopg[c,pool]==3.3.4
+# Pinned: pymdown-extensions 12.2+ changed Highlight.__init__() and breaks mkdocstrings 1.0.4 (docs build fails)
+pymdown-extensions==12.1
 PyYAML==6.0.3
 requests==2.33.1
 rq==2.8.0
