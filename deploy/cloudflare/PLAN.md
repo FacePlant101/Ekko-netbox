@@ -102,12 +102,16 @@ handler), `bin/web.sh`, `bin/rqworker.sh`, `supervisord.conf`. The Worker's
 `Content-Length` on uploads (R2 streams need a known length), so backups are
 written to local disk first and uploaded with `curl -T`.
 
-`enableInternet` is false: egress is the R2 handler plus `allowedHosts` in
-`src/index.ts` (currently only the NetBox news-feed host used by the default
-dashboard widget). Add an SMTP relay or OIDC provider there when needed. The
-container also gets `RES_OPTIONS=timeout:1 attempts:1`: without it, a lookup for
-any other host hangs for the resolver's full retry budget (about 20 s per page
-render that triggers one).
+`enableInternet` is false and the R2 handler is the only egress. Do not add
+`allowedHosts` or `deniedHosts`: they switch the containers SDK to intercept-all
+mode, which the runtime cannot undo for a running instance, and in that mode the
+R2 virtual host was denied with HTTP 520 even when listed. That outage silently
+stopped WAL archiving for several hours on 2026-10-16; `pg-prepare.sh` now
+refuses to start an empty cluster unless R2 answers a definite 404. Egress to an
+SMTP relay or OIDC provider therefore needs its own outbound handler rather than
+an allow list. The container also gets `RES_OPTIONS=timeout:1 attempts:1` so a
+lookup for any other host (the dashboard news-feed widget, for example) fails in
+about a second instead of 20.
 
 ## 2. Repository changes
 
@@ -240,6 +244,35 @@ Set the Worker secrets `NETBOX_SUPERUSER_NAME`, `NETBOX_SUPERUSER_EMAIL` and
 `NETBOX_SUPERUSER_PASSWORD`; `bin/web.sh` creates that superuser after
 migrations if it does not exist yet. The secrets can be deleted afterwards or
 left in place (existing users are never modified).
+
+### Importing an existing database
+
+Stage the dump and optional media in R2 and restart the container; `bin/pg-import.sh`
+does the rest on boot (restore into a staging database, verify, swap, keep the old
+one as `netbox_previous`, unpack media, then NetBox's own migrations upgrade the
+schema). Only same-major dumps, or the last minor of the previous major (3.7.x for
+4.x), can be imported, per the NetBox upgrade rules.
+
+```
+gzip -9 -c netbox.sql > netbox.sql.gz
+tar -czf media.tar.gz -C /path/to/netbox media        # must contain media/ at the root
+npx wrangler r2 object put netbox-media/backup/import/netbox.sql.gz --file netbox.sql.gz --remote
+npx wrangler r2 object put netbox-media/backup/import/media.tar.gz --file media.tar.gz --remote
+printf 'netbox.sql.gz' > READY
+npx wrangler r2 object put netbox-media/backup/import/READY --file READY --remote
+curl -X POST -H "X-Admin-Token: $ADMIN_TOKEN" https://netbox.lydfirmaetekko.no/__admin/restart
+```
+
+Done 2026-10-16: the NetBox 3.7.6 dump from October 2025 (36 sites, 1,759
+devices, 534 device types, 14 users) was imported this way and migrated to 4.5.10
+(167 migrations, no errors). Image attachments whose files were missing from the
+old media tarball return 404; everything else serves.
+
+### Diagnostics and restart
+
+`GET /__admin/diag` and `POST /__admin/restart`, both with the `X-Admin-Token`
+header (Worker secret `ADMIN_TOKEN`). The diagnostics output is a fixed script
+(`bin/diag.sh`): process status plus log tails, no parameters.
 
 ### Deploying by hand
 
