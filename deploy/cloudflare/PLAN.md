@@ -252,9 +252,13 @@ npx wrangler secret put API_TOKEN_PEPPERS  # once; "1=<50+ random characters>"
 npx wrangler deploy --containers-rollout immediate
 ```
 
-A rollout replaces the running container: SIGTERM archives the last WAL
-segment, the new instance restores from R2. Expect one to two minutes of
-unavailability per deploy.
+A rollout replaces the running container only when the image or instance type
+changed: SIGTERM archives the last WAL segment and the new instance restores
+from R2 (about one minute plus restore time; a fresh database with all
+migrations took about 11 minutes on one vCPU). A Worker-only deploy leaves the
+container running, so changes to the environment it receives (`envVars`,
+secrets) take effect on its next start. Outbound policy changes (`allowedHosts`,
+handlers) apply to the running container.
 
 ## 3. Rollout plan
 
