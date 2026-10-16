@@ -1,0 +1,10 @@
+# NetBox plugins installed into the Cloudflare image. Pin to the release each
+# project lists for NetBox 4.5.x; bump together with the NetBox version.
+# netbox-documents: 4.5+ -> 0.8.2 (0.8.5 is for 4.6+)
+netbox-documents==0.8.2
+# netbox-topology-views: v4.5.x releases target NetBox 4.5 (v4.7.0 requires 4.7)
+netbox-topology-views==4.5.1
+# netbox-floorplan-plugin: COMPATIBILITY.md maps 0.9.1 to NetBox 4.5.x
+netbox-floorplan-plugin==0.9.1
+# netbox-interface-synchronization (formerly netbox-interface-sync): 4.5.8 tested with NetBox 4.5.8
+netbox-interface-synchronization==4.5.8

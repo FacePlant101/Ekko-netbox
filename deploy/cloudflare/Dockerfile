@@ -30,9 +30,10 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /opt/netbox
 COPY requirements.txt ./
+COPY deploy/cloudflare/plugin_requirements.txt ./plugin_requirements.txt
 # boto3 backs django-storages' S3 backend for R2 (media + custom scripts).
 RUN pip install --upgrade pip wheel \
-    && pip install -r requirements.txt boto3 supervisor
+    && pip install -r requirements.txt -r plugin_requirements.txt boto3 supervisor
 
 COPY netbox/ ./netbox/
 COPY deploy/cloudflare/configuration.py ./netbox/netbox/configuration.py

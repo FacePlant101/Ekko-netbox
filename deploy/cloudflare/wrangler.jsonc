@@ -67,6 +67,8 @@
     "ALLOWED_HOSTS": "netbox.lydfirmaetekko.no,netbox.aleksander-vassdal.workers.dev",
     "CSRF_TRUSTED_ORIGINS": "https://netbox.lydfirmaetekko.no,https://netbox.aleksander-vassdal.workers.dev",
     "NETBOX_ROLE": "allinone",
+    // Plugins installed by deploy/cloudflare/plugin_requirements.txt.
+    "PLUGINS": "netbox_documents,netbox_topology_views,netbox_floorplan,netbox_interface_synchronization",
     // Base backup cadence; WAL is archived at least every 60 s regardless.
     "BACKUP_INTERVAL_SECONDS": "21600",
     "TIME_ZONE": "Europe/Oslo"
