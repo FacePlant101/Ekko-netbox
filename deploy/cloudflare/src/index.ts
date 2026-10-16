@@ -21,6 +21,8 @@ declare global {
   interface Env {
     SECRET_KEY: string;
     API_TOKEN_PEPPERS?: string;
+    // Enables GET /__admin/diag (X-Admin-Token header): read-only diagnostics.
+    ADMIN_TOKEN?: string;
     // Optional first-admin bootstrap, applied idempotently by bin/web.sh.
     NETBOX_SUPERUSER_NAME?: string;
     NETBOX_SUPERUSER_EMAIL?: string;
@@ -144,6 +146,22 @@ export class NetBox extends Container<Env> {
   async status() {
     return this.getState();
   }
+
+  /** Run the fixed, read-only diagnostics script inside the container. */
+  async diagnostics(): Promise<{ exitCode: number; output: string }> {
+    const container = this.ctx.container;
+    if (!container?.running) return { exitCode: -1, output: "container is not running\n" };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const proc = await container.exec(["/opt/netbox/bin/diag.sh"], { stderr: "combined", signal: controller.signal });
+      const out = await proc.output();
+      const dec = new TextDecoder();
+      return { exitCode: out.exitCode, output: dec.decode(out.stdout) + dec.decode(out.stderr) };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 }
 
 // Registered via the SDK's static setter; a `static` class field would shadow the
@@ -226,6 +244,17 @@ export default {
     if (url.pathname === "/__health") {
       const state = await env.NETBOX.getByName(INSTANCE).status();
       return Response.json({ netbox: state }, { headers: { "Cache-Control": "no-store" } });
+    }
+
+    if (url.pathname === "/__admin/diag") {
+      if (!env.ADMIN_TOKEN || request.headers.get("X-Admin-Token") !== env.ADMIN_TOKEN) {
+        return new Response("forbidden", { status: 403 });
+      }
+      const result = await env.NETBOX.getByName(INSTANCE).diagnostics();
+      return new Response(result.output, {
+        status: result.exitCode === 0 ? 200 : 500,
+        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+      });
     }
 
     if (url.pathname.startsWith("/static/")) {

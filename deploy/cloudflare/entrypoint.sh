@@ -26,7 +26,12 @@ case "$ROLE" in
         export DB_SSLMODE=disable
         export REDIS_TASKS_URL="redis://127.0.0.1:6379/0"
         export REDIS_CACHE_URL="redis://127.0.0.1:6379/1"
-        /opt/netbox/bin/pg-prepare.sh
+        mkdir -p /tmp/logs
+        # Program logs go to files (readable through the Worker's diagnostics
+        # endpoint) and are mirrored to stdout for the platform's log collection.
+        tail -q -F -n0 /tmp/logs/supervisord.log /tmp/logs/postgres.log /tmp/logs/redis.log \
+            /tmp/logs/web.log /tmp/logs/rqworker.log /tmp/logs/backup.log 2>/dev/null &
+        /opt/netbox/bin/pg-prepare.sh 2>&1 | tee -a /tmp/logs/pg-prepare.log
         # Run supervisord in the background so SIGTERM can archive the last WAL
         # segment before Postgres is stopped.
         supervisord -c /opt/netbox/supervisord.conf &
