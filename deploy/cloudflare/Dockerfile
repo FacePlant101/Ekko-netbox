@@ -41,10 +41,14 @@ COPY deploy/cloudflare/configuration.py ./netbox/netbox/configuration.py
 # Collect static files with a throwaway configuration. gunicorn does not serve
 # them (DEBUG=False); the Worker serves /static/ from Workers Static Assets built
 # from the same output, both in production and under wrangler dev.
+# PLUGINS must match the enabled plugins so their static files are collected too
+# (the same list as the PLUGINS var in wrangler.jsonc).
+ARG NETBOX_PLUGINS=netbox_documents,netbox_topology_views,netbox_floorplan,netbox_interface_synchronization
 RUN SECRET_KEY=build-only-placeholder-not-a-secret-0123456789abcdefghijklmnopqrstuvwxyz \
     REDIS_TASKS_URL=redis://localhost:6379/0 \
     REDIS_CACHE_URL=redis://localhost:6379/1 \
     DB_HOST=localhost \
+    PLUGINS="$NETBOX_PLUGINS" \
     python netbox/manage.py collectstatic --no-input
 
 ############################
