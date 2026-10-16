@@ -109,15 +109,12 @@ export class NetBox extends Container<Env> {
   // The cron trigger renews activity every 5 minutes, so this only matters if
   // the trigger stalls. Sleeping is safe (WAL is archived) but costs a restore.
   sleepAfter = "1h";
-  // No public internet by default: egress is the R2 handler plus the hosts below.
-  // Add SMTP relays or OIDC providers here when needed (ports 80/443 only).
+  // No public internet: the only egress is the R2 handler, registered per host.
+  // Do NOT add allowedHosts/deniedHosts here: they switch the SDK to intercept-all
+  // mode, which the runtime cannot undo for a running instance, and in that mode
+  // the R2 virtual host was denied (HTTP 520) even when listed. Unknown hosts fail
+  // DNS within a second (RES_OPTIONS), so the dashboard feed widget degrades fast.
   enableInternet = false;
-  // The allowedHosts gate runs before per-host handlers, so the virtual R2 host
-  // must be listed here too or every backup call is blocked with a 520.
-  allowedHosts = [
-    R2_HOST,
-    "api.netbox.oss.netboxlabs.com", // default dashboard news-feed widget
-  ];
 
   constructor(ctx: DurableObjectCtx, env: Env) {
     super(ctx, env);
