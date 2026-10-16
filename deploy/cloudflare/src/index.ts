@@ -159,6 +159,17 @@ export class NetBox extends Container<Env> {
     return this.getState();
   }
 
+  /**
+   * Graceful restart: SIGTERM lets pre-stop.sh archive the last WAL segment; the
+   * next request or cron tick starts a fresh instance, which restores from R2 and
+   * picks up new secrets, vars and any import staged under backup/import/.
+   */
+  async restart(): Promise<string> {
+    if (!this.ctx.container?.running) return "not running";
+    await this.stop();
+    return "stopping";
+  }
+
   /** Run the fixed, read-only diagnostics script inside the container. */
   async diagnostics(): Promise<{ exitCode: number; output: string }> {
     const container = this.ctx.container;
@@ -256,6 +267,15 @@ export default {
     if (url.pathname === "/__health") {
       const state = await env.NETBOX.getByName(INSTANCE).status();
       return Response.json({ netbox: state }, { headers: { "Cache-Control": "no-store" } });
+    }
+
+    if (url.pathname === "/__admin/restart") {
+      if (!env.ADMIN_TOKEN || request.headers.get("X-Admin-Token") !== env.ADMIN_TOKEN) {
+        return new Response("forbidden", { status: 403 });
+      }
+      if (request.method !== "POST") return new Response("POST required", { status: 405 });
+      const result = await env.NETBOX.getByName(INSTANCE).restart();
+      return new Response(result + "\n", { headers: { "Cache-Control": "no-store" } });
     }
 
     if (url.pathname === "/__admin/diag") {
