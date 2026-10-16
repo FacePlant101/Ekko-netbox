@@ -1,15 +1,16 @@
 #!/bin/sh
 # Entrypoint for the NetBox image on Cloudflare Containers.
 # NETBOX_ROLE selects what this instance does:
-#   web     - run migrations, then serve HTTP with gunicorn (default)
-#   worker  - run the RQ worker for background jobs
-#   migrate - run migrations and exit
-#   manage  - run an arbitrary manage.py command: NETBOX_ROLE=manage <args>
+#   allinone - Postgres + Redis + gunicorn + rqworker + R2 backups under supervisord (default)
+#   web      - run migrations, then serve HTTP with gunicorn (external Postgres/Redis)
+#   worker   - run the RQ worker for background jobs (external Postgres/Redis)
+#   migrate  - run migrations and exit
+#   manage   - run an arbitrary manage.py command: NETBOX_ROLE=manage <args>
 set -eu
 
 cd /opt/netbox/netbox
 
-ROLE="${NETBOX_ROLE:-web}"
+ROLE="${NETBOX_ROLE:-allinone}"
 
 run_migrations() {
     echo "[entrypoint] applying database migrations"
@@ -19,6 +20,28 @@ run_migrations() {
 }
 
 case "$ROLE" in
+    allinone)
+        export PGDATA="${PGDATA:-/opt/netbox/pgdata}"
+        export DATABASE_URL="postgres://netbox@127.0.0.1:5432/netbox"
+        export DB_SSLMODE=disable
+        export REDIS_TASKS_URL="redis://127.0.0.1:6379/0"
+        export REDIS_CACHE_URL="redis://127.0.0.1:6379/1"
+        /opt/netbox/bin/pg-prepare.sh
+        # Run supervisord in the background so SIGTERM can archive the last WAL
+        # segment before Postgres is stopped.
+        supervisord -c /opt/netbox/supervisord.conf &
+        SUP=$!
+        on_term() {
+            echo "[entrypoint] SIGTERM received, flushing WAL to R2 and shutting down"
+            /opt/netbox/bin/pre-stop.sh || true
+            supervisorctl -c /opt/netbox/supervisord.conf shutdown >/dev/null 2>&1 || kill -TERM "$SUP"
+        }
+        trap on_term TERM INT
+        wait "$SUP" || true
+        trap - TERM INT
+        wait "$SUP"
+        exit $?
+        ;;
     web)
         if [ "${SKIP_MIGRATIONS:-0}" != "1" ]; then
             run_migrations

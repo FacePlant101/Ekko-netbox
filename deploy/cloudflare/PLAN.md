@@ -1,6 +1,9 @@
 # Deploying NetBox on Cloudflare Containers
 
-Status: Phases 1 to 3 implemented; 1 and 2 verified locally (see section 6). Phase 3 (CI) is written but has not run against a real account. Phase 4 is operational guidance. Written against the Cloudflare Containers
+Status: Phases 1 to 3 implemented. The deployment now runs entirely on Cloudflare
+(section 1a): one container with Postgres and Redis inside, durable via WAL
+archiving to R2. Section 1's external-database layout remains supported through
+`NETBOX_ROLE=web|worker` but is not the deployed configuration. Written against the Cloudflare Containers
 docs as of October 2026 and this fork (upstream v4.5.10 plus the AV-connector /
 GPIO additions in `dcim/choices.py`).
 
@@ -47,13 +50,60 @@ Start with:
 
 | Class | Instance type | Why |
 | --- | --- | --- |
-| `NetBoxWeb` | `standard-1` (1/2 vCPU, 4 GiB, 8 GB disk) | Headroom for migrations and large table exports |
-| `NetBoxWorker` | `basic` (1/4 vCPU, 1 GiB) | Idle most of the time; raise to `standard-1` if scripts/reports are heavy |
+| `NetBox` (all-in-one, deployed) | `standard-2` (1 vCPU, 6 GiB, 12 GB disk) | Postgres (512 MB shared buffers), Redis, gunicorn and rqworker together; disk holds the database plus one base backup in flight |
+| `NetBoxWeb` (external DB layout) | `standard-1` (1/2 vCPU, 4 GiB, 8 GB disk) | Headroom for migrations and large table exports |
+| `NetBoxWorker` (external DB layout) | `basic` (1/4 vCPU, 1 GiB) | Idle most of the time |
 
 Requires the Workers Paid plan. Rough steady-state cost at 1 web instance running
 24h: ~0.5 vCPU x 730 h plus 4 GiB x 730 h of memory, on the order of USD 30 to 40
 per month plus the external Postgres and Redis. Letting the web container sleep
 outside working hours cuts this proportionally.
+
+## 1a. All-on-Cloudflare layout (deployed)
+
+Cloudflare has no managed PostgreSQL or Redis, and a container can only reach
+Workers bindings over HTTP. So the database runs inside the NetBox container and
+is made durable with Postgres' own archiving, written to R2 through the Worker:
+
+```
+Internet ──> Worker (netbox)
+               ├── /static/*  ──> Workers Static Assets
+               └── /*         ──> NetBox container (standard-2, singleton)
+             Cron (*/5)       ──> keepAlive(): container never idles out
+
+NetBox container (supervisord):
+  postgres 15 (127.0.0.1:5432)   archive_command ──HTTP──> http://r2.internal/backup/wal/<seg>
+  redis 7    (127.0.0.1:6379)
+  gunicorn   (0.0.0.0:8001)      ──> Worker proxies here
+  rqworker
+  backup loop: pg_basebackup + media/scripts tar every 6 h ──> r2.internal/backup/base/<ts>/
+
+Worker outbound handler for host r2.internal ──> R2 binding BACKUPS (bucket netbox-media)
+```
+
+Durability model:
+
+| Event | Effect |
+| --- | --- |
+| Planned stop (deploy, idle) | SIGTERM: `pre-stop.sh` switches WAL and waits for it to archive; zero loss |
+| Crash / host restart | Lose the writes since the last archived segment: normally under 60 s (`archive_timeout`), up to about two minutes right after a restart because Postgres' first forced switch is measured from startup |
+| Next start | `pg-prepare.sh` restores the newest base backup from R2, replays archived WAL, promotes |
+| Media uploads, custom scripts | Tarred with each base backup (up to 6 h old after a crash) |
+
+WAL segments are gzipped on upload (`bin/wal-put.sh` / `bin/wal-get.sh`), since
+forced switches archive mostly empty 16 MB files. Recovery point: about 60 s. Recovery time: container start plus restore, proportional to
+database size (seconds for a typical NetBox). This is a single-node database with
+no HA; see risks in section 4.
+
+Files: `bin/pg-prepare.sh` (restore or initdb), `bin/pg-backup.sh`,
+`bin/backup-loop.sh`, `bin/pre-stop.sh`, `bin/r2.sh` (curl wrapper for the
+handler), `bin/web.sh`, `bin/rqworker.sh`, `supervisord.conf`. The Worker's
+`r2Handler` confines all keys to the `backup/` prefix and requires
+`Content-Length` on uploads (R2 streams need a known length), so backups are
+written to local disk first and uploaded with `curl -T`.
+
+`enableInternet` is false: the container's only egress is the R2 handler. Add
+`allowedHosts` for an SMTP relay or OIDC provider when needed.
 
 ## 2. Repository changes
 
@@ -232,6 +282,8 @@ serialised so two pushes cannot interleave rollouts.
 | --- | --- | --- |
 | Cold start after sleep | migrate + gunicorn boot is 15 to 40 s; the first request waits | Keep `sleepAfter` long (2h), or add a cron ping during business hours. Decide: always-on vs cost |
 | Single web instance | No horizontal scaling; a host restart means a short outage | Acceptable for an internal source of truth. Scaling to N requires moving migrate out of the entrypoint and using `getRandom` |
+| Database inside the container | Single node, no HA; up to 60 s of writes lost on a crash; restore time grows with DB size | Accepted for now. Moving to a managed Postgres later only needs `NETBOX_ROLE=web|worker` and the URLs as secrets |
+| Backup correctness | A bug in the archive/restore scripts silently breaks recovery | Test a restore regularly: stop the container (or `wrangler containers delete`) and confirm the data comes back; consider a monthly `pg_dump` to R2 as a second copy |
 | RQ worker kept alive by cron | Up to 5 min gap after an unexpected kill; cron fires are best-effort | Keep heavy scheduled jobs idempotent; NetBox's own jobs already are |
 | Container location vs database region | Instances start near the first requester; DB latency can vary | Pick a DB region near the user base. Smart Placement can be enabled on the Worker |
 | Redis egress to Upstash on every request | Latency and per-command billing | Enable the Redis `caching` DB only (NetBox requires it); consider Redis Cloud fixed plan if command volume is high |

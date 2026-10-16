@@ -32,7 +32,7 @@ WORKDIR /opt/netbox
 COPY requirements.txt ./
 # boto3 backs django-storages' S3 backend for R2 (media + custom scripts).
 RUN pip install --upgrade pip wheel \
-    && pip install -r requirements.txt boto3
+    && pip install -r requirements.txt boto3 supervisor
 
 COPY netbox/ ./netbox/
 COPY deploy/cloudflare/configuration.py ./netbox/netbox/configuration.py
@@ -54,9 +54,12 @@ FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH" \
-    NETBOX_ROLE=web \
-    PORT=8001
+    NETBOX_ROLE=allinone \
+    PORT=8001 \
+    PGDATA=/opt/netbox/pgdata
 
+# postgresql-15 and redis-server back the all-in-one role; the image also works as a
+# plain web/worker image against external services.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq5 \
         libxml2 \
@@ -65,6 +68,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         zlib1g \
         ca-certificates \
         curl \
+        postgresql-common \
+    && echo "create_main_cluster = false" >> /etc/postgresql-common/createcluster.conf \
+    && apt-get install -y --no-install-recommends \
+        postgresql-15 \
+        postgresql-client-15 \
+        redis-server \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 999 netbox \
     && useradd --system --uid 999 --gid netbox --home-dir /opt/netbox --shell /usr/sbin/nologin netbox
@@ -73,17 +82,20 @@ COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder --chown=netbox:netbox /opt/netbox/netbox /opt/netbox/netbox
 COPY --chown=netbox:netbox deploy/cloudflare/gunicorn_config.py /opt/netbox/gunicorn_config.py
 COPY --chown=netbox:netbox deploy/cloudflare/entrypoint.sh /opt/netbox/entrypoint.sh
+COPY --chown=netbox:netbox deploy/cloudflare/supervisord.conf /opt/netbox/supervisord.conf
+COPY --chown=netbox:netbox deploy/cloudflare/bin/ /opt/netbox/bin/
 
 # Writable locations for the filesystem fallbacks (local testing without R2).
-RUN mkdir -p /opt/netbox/netbox/media /opt/netbox/netbox/scripts /opt/netbox/netbox/reports \
-    && chown -R netbox:netbox /opt/netbox/netbox/media /opt/netbox/netbox/scripts /opt/netbox/netbox/reports
+RUN mkdir -p /opt/netbox/netbox/media /opt/netbox/netbox/scripts /opt/netbox/netbox/reports /opt/netbox/pgdata \
+    && chown -R netbox:netbox /opt/netbox/netbox/media /opt/netbox/netbox/scripts /opt/netbox/netbox/reports /opt/netbox/pgdata \
+    && chmod +x /opt/netbox/bin/*.sh
 
 USER netbox
 WORKDIR /opt/netbox/netbox
 
 EXPOSE 8001
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
     CMD curl -fsS "http://127.0.0.1:${PORT}/login/" > /dev/null || exit 1
 
 ENTRYPOINT ["/opt/netbox/entrypoint.sh"]

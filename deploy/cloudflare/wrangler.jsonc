@@ -21,52 +21,49 @@
     "not_found_handling": "none"
   },
 
-  // Both classes use the same image; NETBOX_ROLE picks the process at start.
+  // One container runs the whole stack (Postgres, Redis, gunicorn, rqworker).
   // The Dockerfile expects the repository root as build context.
   "containers": [
     {
-      "class_name": "NetBoxWeb",
+      "class_name": "NetBox",
       "image": "./Dockerfile",
       "image_build_context": "../..",
-      "instance_type": "standard-1",
-      "max_instances": 1
-    },
-    {
-      "class_name": "NetBoxWorker",
-      "image": "./Dockerfile",
-      "image_build_context": "../..",
-      "instance_type": "basic",
+      "instance_type": "standard-2",
       "max_instances": 1
     }
   ],
 
   "durable_objects": {
     "bindings": [
-      { "name": "NETBOX_WEB", "class_name": "NetBoxWeb" },
-      { "name": "NETBOX_WORKER", "class_name": "NetBoxWorker" }
+      { "name": "NETBOX", "class_name": "NetBox" }
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["NetBoxWeb", "NetBoxWorker"] }
+    { "tag": "v1", "new_sqlite_classes": ["NetBox"] }
   ],
 
-  // Keeps the RQ worker alive (and restarts it after a host restart).
+  // Postgres WAL archive and base backups, written through the Worker's
+  // outbound handler (the container has no S3 credentials).
+  "r2_buckets": [
+    { "binding": "BACKUPS", "bucket_name": "netbox-media" }
+  ],
+
+  // Keeps the container running: it hosts the database, so it should not sleep.
   "triggers": {
     "crons": ["*/5 * * * *"]
   },
 
-  // Non-secret configuration forwarded into the containers. Secrets are created with
-  // `wrangler secret put <NAME>`:
-  //   SECRET_KEY, DATABASE_URL, REDIS_TASKS_URL, REDIS_CACHE_URL,
-  //   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, API_TOKEN_PEPPERS (optional)
+  // Non-secret configuration forwarded into the container. Secrets are created with
+  // `wrangler secret put <NAME>`: SECRET_KEY and API_TOKEN_PEPPERS. (DATABASE_URL and
+  // the Redis URLs are only needed for the external-database roles.)
   "vars": {
-    "ALLOWED_HOSTS": "netbox.example.com",
-    "CSRF_TRUSTED_ORIGINS": "https://netbox.example.com",
-    "R2_BUCKET": "netbox-media",
-    "R2_ENDPOINT": "https://<ACCOUNT_ID>.r2.cloudflarestorage.com",
-    "TIME_ZONE": "UTC",
-    // "true" keeps the web container warm from the cron trigger as well, trading
-    // cost for no cold starts.
-    "WEB_ALWAYS_ON": "false"
+    // First deploy runs on the workers.dev hostname, so accept any Host (the Worker
+    // is the only client). Tighten to the real hostname once a custom domain is bound.
+    "ALLOWED_HOSTS": "*",
+    "CSRF_TRUSTED_ORIGINS": "",
+    "NETBOX_ROLE": "allinone",
+    // Base backup cadence; WAL is archived at least every 60 s regardless.
+    "BACKUP_INTERVAL_SECONDS": "21600",
+    "TIME_ZONE": "Europe/Oslo"
   }
 }
