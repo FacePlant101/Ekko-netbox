@@ -13,10 +13,10 @@
 
   // Public hostname. Wrangler creates the DNS record and certificate in the zone;
   // the hostname must not already have A/AAAA/CNAME records.
-  // "routes": [
-  //   { "pattern": "netbox.lydfirmaetekko.no", "custom_domain": true }
-  // ],
-  "workers_dev": true,
+  "routes": [
+    { "pattern": "netbox.lydfirmaetekko.no", "custom_domain": true }
+  ],
+  "workers_dev": false,
 
   // Static files collected by `python manage.py collectstatic` (run `npm run collectstatic`
   // or build the image first). The Worker rewrites /static/<path> to /<path> before
