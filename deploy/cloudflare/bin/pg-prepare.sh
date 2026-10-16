@@ -14,7 +14,21 @@ if [ -s "$PGDATA/PG_VERSION" ]; then
 fi
 
 mkdir -p "$PGDATA" && chmod 700 "$PGDATA"
-LATEST=$($R2 cat "$BACKUP_PREFIX/base/LATEST" 2>/dev/null || true)
+# A fresh cluster is only acceptable when R2 definitely has no backup (404).
+# Any other failure means R2 is unreachable: retry, then abort so the container
+# restarts instead of silently starting empty.
+attempt=0
+while :; do
+    rc=0; LATEST=$($R2 cat "$BACKUP_PREFIX/base/LATEST" 2>/tmp/r2-latest.err) || rc=$?
+    [ $rc -eq 0 ] || [ $rc -eq 44 ] && break
+    attempt=$((attempt + 1))
+    if [ $attempt -ge 30 ]; then
+        echo "[pg-prepare] cannot reach R2 after $attempt attempts: $(cat /tmp/r2-latest.err)" >&2
+        exit 1
+    fi
+    echo "[pg-prepare] R2 unreachable ($(tr -d '\n' < /tmp/r2-latest.err)); retrying in 10s"
+    sleep 10
+done
 
 if [ -n "$LATEST" ]; then
     echo "[pg-prepare] restoring base backup $LATEST from R2"

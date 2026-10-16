@@ -112,7 +112,10 @@ export class NetBox extends Container<Env> {
   // No public internet by default: egress is the R2 handler plus the hosts below.
   // Add SMTP relays or OIDC providers here when needed (ports 80/443 only).
   enableInternet = false;
+  // The allowedHosts gate runs before per-host handlers, so the virtual R2 host
+  // must be listed here too or every backup call is blocked with a 520.
   allowedHosts = [
+    R2_HOST,
     "api.netbox.oss.netboxlabs.com", // default dashboard news-feed widget
   ];
 
@@ -135,10 +138,12 @@ export class NetBox extends Container<Env> {
   }
 
   override async fetch(request: Request): Promise<Response> {
-    if (!this.ctx.container?.running) {
+    // Wait for the whole startup window whenever the container is not yet healthy,
+    // including when the cron trigger started it moments ago.
+    if (!this.ctx.container?.running || (await this.getState()).status !== "healthy") {
       const t0 = Date.now();
       await this.startAndWaitForPorts(startupWait(WEB_PORT, STARTUP_TIMEOUT_MS));
-      console.log(`netbox: cold start took ${Date.now() - t0}ms`);
+      console.log(`netbox: start wait took ${Date.now() - t0}ms`);
     }
     // Passing the original Request keeps its absolute URL, so Django sees the
     // public hostname in Host and ALLOWED_HOSTS applies as configured.

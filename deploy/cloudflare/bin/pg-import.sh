@@ -17,7 +17,10 @@ NETBOX_DIR=/opt/netbox/netbox
 WORK=/tmp/pg-import.$$
 TS=$(date -u +%Y%m%dT%H%M%SZ)
 
-NAME=$($R2 cat "$BACKUP_PREFIX/import/READY" 2>/dev/null | tr -d '[:space:]' || true)
+rc=0; NAME=$($R2 cat "$BACKUP_PREFIX/import/READY" 2>/dev/null) || rc=$?
+if [ $rc -eq 44 ]; then exit 0; fi
+if [ $rc -ne 0 ]; then echo "[pg-import] cannot reach R2 to check for a staged import" >&2; exit 1; fi
+NAME=$(printf '%s' "$NAME" | tr -d '[:space:]')
 [ -n "$NAME" ] || exit 0
 
 echo "[pg-import] importing $NAME into a staging database"
