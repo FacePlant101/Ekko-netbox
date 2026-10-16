@@ -11,6 +11,13 @@
     "enabled": true
   },
 
+  // Public hostname. Wrangler creates the DNS record and certificate in the zone;
+  // the hostname must not already have A/AAAA/CNAME records.
+  // "routes": [
+  //   { "pattern": "netbox.lydfirmaetekko.no", "custom_domain": true }
+  // ],
+  "workers_dev": true,
+
   // Static files collected by `python manage.py collectstatic` (run `npm run collectstatic`
   // or build the image first). The Worker rewrites /static/<path> to /<path> before
   // handing off to this binding, so gunicorn never serves static files.
@@ -57,10 +64,8 @@
   // `wrangler secret put <NAME>`: SECRET_KEY and API_TOKEN_PEPPERS. (DATABASE_URL and
   // the Redis URLs are only needed for the external-database roles.)
   "vars": {
-    // First deploy runs on the workers.dev hostname, so accept any Host (the Worker
-    // is the only client). Tighten to the real hostname once a custom domain is bound.
-    "ALLOWED_HOSTS": "*",
-    "CSRF_TRUSTED_ORIGINS": "",
+    "ALLOWED_HOSTS": "netbox.lydfirmaetekko.no,netbox.aleksander-vassdal.workers.dev",
+    "CSRF_TRUSTED_ORIGINS": "https://netbox.lydfirmaetekko.no,https://netbox.aleksander-vassdal.workers.dev",
     "NETBOX_ROLE": "allinone",
     // Base backup cadence; WAL is archived at least every 60 s regardless.
     "BACKUP_INTERVAL_SECONDS": "21600",

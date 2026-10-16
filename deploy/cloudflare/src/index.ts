@@ -31,6 +31,8 @@ declare global {
     DATABASE_URL?: string;
     REDIS_TASKS_URL?: string;
     REDIS_CACHE_URL?: string;
+    R2_BUCKET?: string;
+    R2_ENDPOINT?: string;
     R2_ACCESS_KEY_ID?: string;
     R2_SECRET_ACCESS_KEY?: string;
     COOKIE_SECURE?: string;
