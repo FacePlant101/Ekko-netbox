@@ -102,8 +102,12 @@ handler), `bin/web.sh`, `bin/rqworker.sh`, `supervisord.conf`. The Worker's
 `Content-Length` on uploads (R2 streams need a known length), so backups are
 written to local disk first and uploaded with `curl -T`.
 
-`enableInternet` is false: the container's only egress is the R2 handler. Add
-`allowedHosts` for an SMTP relay or OIDC provider when needed.
+`enableInternet` is false: egress is the R2 handler plus `allowedHosts` in
+`src/index.ts` (currently only the NetBox news-feed host used by the default
+dashboard widget). Add an SMTP relay or OIDC provider there when needed. The
+container also gets `RES_OPTIONS=timeout:1 attempts:1`: without it, a lookup for
+any other host hangs for the resolver's full retry budget (about 20 s per page
+render that triggers one).
 
 ## 2. Repository changes
 

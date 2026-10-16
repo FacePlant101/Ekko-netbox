@@ -83,7 +83,14 @@ function startupWait(port: number, timeoutMs: number) {
 }
 
 function containerEnv(env: Env): Record<string, string> {
-  const vars: Record<string, string> = { PORT: String(WEB_PORT), R2_HOST, BACKUP_PREFIX: BACKUP_PREFIX.replace(/\/$/, "") };
+  const vars: Record<string, string> = {
+    PORT: String(WEB_PORT),
+    R2_HOST,
+    BACKUP_PREFIX: BACKUP_PREFIX.replace(/\/$/, ""),
+    // Without internet access, lookups for unknown hosts hang for the resolver's
+    // full retry budget (about 20 s). Fail them in about a second instead.
+    RES_OPTIONS: "timeout:1 attempts:1",
+  };
   for (const name of FORWARDED_ENV) {
     const value: unknown = env[name];
     if (typeof value === "string" && value.length > 0) {
@@ -100,9 +107,12 @@ export class NetBox extends Container<Env> {
   // The cron trigger renews activity every 5 minutes, so this only matters if
   // the trigger stalls. Sleeping is safe (WAL is archived) but costs a restore.
   sleepAfter = "1h";
-  // No public internet: the only egress is the R2 handler below. Add hosts to
-  // allowedHosts for SMTP relays or OIDC providers when needed.
+  // No public internet by default: egress is the R2 handler plus the hosts below.
+  // Add SMTP relays or OIDC providers here when needed (ports 80/443 only).
   enableInternet = false;
+  allowedHosts = [
+    "api.netbox.oss.netboxlabs.com", // default dashboard news-feed widget
+  ];
 
   constructor(ctx: DurableObjectCtx, env: Env) {
     super(ctx, env);
