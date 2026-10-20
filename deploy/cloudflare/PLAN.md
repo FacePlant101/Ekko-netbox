@@ -169,6 +169,7 @@ deploy/cloudflare/
 | `ALLOWED_HOSTS` (comma list), `CSRF_TRUSTED_ORIGINS` | the same |
 | `BASE_PATH`, `TIME_ZONE` | optional passthrough |
 | `PLUGINS` (comma list) | optional override; otherwise the list in `plugins.txt` baked into the image |
+| `BRANCHING_PROVISION_WORKERS` | netbox-branching `provision_workers`, default 1 (single vCPU) |
 
 `SECURE_PROXY_SSL_HEADER` and `USE_X_FORWARDED_HOST` are already set in
 `settings.py`, so the Worker only has to forward `X-Forwarded-Proto: https`.
@@ -348,6 +349,11 @@ serialised so two pushes cannot interleave rollouts.
 - Upgrades: merge upstream, rebuild, deploy. Migrations run on first start of
   the new web instance. For breaking schema changes accept the brief window
   while the old instance drains (up to 15 min SIGTERM grace, usually seconds).
+  netbox-branching does not migrate branch schemas: after a minor upgrade
+  (e.g. 4.5 to 4.6) open branches show "Pending Migrations" until each is
+  migrated from its Migrate action, so merge or delete open branches first
+  where possible. Bump `netboxlabs-netbox-branching` together with NetBox
+  (1.1.x covers 4.4.1-4.6.x, 1.2.x is 4.7).
 - Logs: Workers Logs with 7-day retention; add Logpush if longer is needed.
 - Monitoring: external uptime check on `/__health`, plus
   `django-prometheus` metrics at `/metrics` if desired (already a dependency).

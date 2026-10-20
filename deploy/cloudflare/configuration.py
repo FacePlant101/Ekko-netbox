@@ -11,6 +11,8 @@ See deploy/cloudflare/PLAN.md for the list of variables.
 import os
 from urllib.parse import unquote, urlparse
 
+from netbox_branching.utilities import DynamicSchemaDict
+
 
 def _env(name, default=None):
     value = os.environ.get(name)
@@ -105,7 +107,7 @@ if _database_url:
         if '=' in part:
             key, value = part.split('=', 1)
             _db_options[unquote(key)] = unquote(value)
-    DATABASES = {
+    DATABASES = DynamicSchemaDict({
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
             'NAME': _db.path.lstrip('/'),
@@ -116,9 +118,9 @@ if _database_url:
             'CONN_MAX_AGE': _env_int('DB_CONN_MAX_AGE', 300),
             'OPTIONS': {'sslmode': _env('DB_SSLMODE', 'require'), **_db_options},
         }
-    }
+    })
 else:
-    DATABASES = {
+    DATABASES = DynamicSchemaDict({
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
             'NAME': _env('DB_NAME', 'netbox'),
@@ -129,7 +131,13 @@ else:
             'CONN_MAX_AGE': _env_int('DB_CONN_MAX_AGE', 300),
             'OPTIONS': {'sslmode': _env('DB_SSLMODE', 'require')},
         }
-    }
+    })
+
+# netbox-branching: DynamicSchemaDict (above) and this router let each request
+# use the active branch's PostgreSQL schema. The plugin refuses to start without both.
+DATABASE_ROUTERS = [
+    'netbox_branching.database.BranchAwareRouter',
+]
 
 # Redis. Two logical databases: tasks (RQ) and caching. Managed providers such as
 # Upstash expose a single DB per instance, so each section accepts its own URL.
@@ -220,7 +228,17 @@ def _plugins_from_file(path='/opt/netbox/plugins.txt'):
 
 
 PLUGINS = _env_list('PLUGINS') or _plugins_from_file()
-PLUGINS_CONFIG = {}
+# netbox-branching must be the last plugin loaded.
+if 'netbox_branching' in PLUGINS:
+    PLUGINS = [name for name in PLUGINS if name != 'netbox_branching'] + ['netbox_branching']
+PLUGINS_CONFIG = {
+    'netbox_branching': {
+        # Parallel connections used to copy tables and build indexes when a branch
+        # is provisioned. The default (4) suits a dedicated multi-core database; this
+        # one shares a single vCPU with gunicorn and rqworker.
+        'provision_workers': _env_int('BRANCHING_PROVISION_WORKERS', 1),
+    },
+}
 
 # Remote authentication via a trusted header. Pairs with Cloudflare Access when
 # the Worker copies Cf-Access-Authenticated-User-Email into the configured header.

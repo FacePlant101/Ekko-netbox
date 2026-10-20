@@ -6,3 +6,5 @@ netbox_documents
 netbox_topology_views
 netbox_floorplan
 netbox_interface_synchronization
+# netbox_branching must stay last (configuration.py also enforces this).
+netbox_branching
