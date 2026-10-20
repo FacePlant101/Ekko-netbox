@@ -1,0 +1,24 @@
+{
+  "name": "netbox-cloudflare",
+  "private": true,
+  "description": "Cloudflare Worker that fronts the NetBox containers",
+  "type": "module",
+  "scripts": {
+    "types": "wrangler types",
+    "typecheck": "wrangler types && tsc --noEmit",
+    "test": "vitest run",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:immediate": "./collectstatic.sh && wrangler deploy --containers-rollout immediate",
+    "collectstatic": "./collectstatic.sh",
+    "predeploy": "./collectstatic.sh"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.3.7"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0",
+    "wrangler": "^4.151.0"
+  }
+}
