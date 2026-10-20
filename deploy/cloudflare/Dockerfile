@@ -36,6 +36,14 @@ RUN pip install --upgrade pip wheel \
 
 COPY netbox/ ./netbox/
 COPY deploy/cloudflare/configuration.py ./netbox/netbox/configuration.py
+
+# Build the bundled documentation into netbox/project-static/docs (mkdocs.yml
+# site_dir), which settings.py serves at /static/docs/ (the footer's Docs link).
+# It must exist before collectstatic below picks it up.
+COPY mkdocs.yml ./
+COPY docs/ ./docs/
+RUN mkdocs build
+
 # Enabled plugins; configuration.py reads this file (see plugins.txt).
 COPY deploy/cloudflare/plugins.txt /opt/netbox/plugins.txt
 
