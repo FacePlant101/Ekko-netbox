@@ -62,6 +62,9 @@ jobs:
       - name: Typecheck Worker
         run: npm run typecheck
 
+      - name: Test Worker helpers
+        run: npm test
+
       - name: Build image and extract static assets
         run: ./collectstatic.sh
 

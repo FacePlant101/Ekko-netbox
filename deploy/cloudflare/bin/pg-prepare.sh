@@ -34,9 +34,15 @@ if [ -n "$LATEST" ]; then
     echo "[pg-prepare] restoring base backup $LATEST from R2"
     $R2 get "$BACKUP_PREFIX/base/$LATEST/base.tar.gz" /tmp/base.tar.gz
     tar -xzf /tmp/base.tar.gz -C "$PGDATA" && rm -f /tmp/base.tar.gz
-    if $R2 get "$BACKUP_PREFIX/base/$LATEST/files.tar.gz" /tmp/files.tar.gz; then
+    # Media and scripts: a definite 404 means the backup has none; any other
+    # failure must abort rather than start with an empty media directory.
+    rc=0; $R2 get "$BACKUP_PREFIX/base/$LATEST/files.tar.gz" /tmp/files.tar.gz || rc=$?
+    if [ $rc -eq 0 ]; then
         tar -xzf /tmp/files.tar.gz -C "$NETBOX_DIR" && rm -f /tmp/files.tar.gz
         echo "[pg-prepare] restored media and scripts"
+    elif [ $rc -ne 44 ]; then
+        echo "[pg-prepare] could not fetch files.tar.gz for $LATEST (rc=$rc); aborting" >&2
+        exit 1
     fi
     # Replay every archived WAL segment, then promote. Postgres removes
     # recovery.signal itself once it has promoted.

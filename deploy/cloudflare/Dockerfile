@@ -31,24 +31,22 @@ ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /opt/netbox
 COPY requirements.txt ./
 COPY deploy/cloudflare/plugin_requirements.txt ./plugin_requirements.txt
-# boto3 backs django-storages' S3 backend for R2 (media + custom scripts).
 RUN pip install --upgrade pip wheel \
-    && pip install -r requirements.txt -r plugin_requirements.txt boto3 supervisor
+    && pip install -r requirements.txt -r plugin_requirements.txt supervisor
 
 COPY netbox/ ./netbox/
 COPY deploy/cloudflare/configuration.py ./netbox/netbox/configuration.py
+# Enabled plugins; configuration.py reads this file (see plugins.txt).
+COPY deploy/cloudflare/plugins.txt /opt/netbox/plugins.txt
 
 # Collect static files with a throwaway configuration. gunicorn does not serve
 # them (DEBUG=False); the Worker serves /static/ from Workers Static Assets built
-# from the same output, both in production and under wrangler dev.
-# PLUGINS must match the enabled plugins so their static files are collected too
-# (the same list as the PLUGINS var in wrangler.jsonc).
-ARG NETBOX_PLUGINS=netbox_documents,netbox_topology_views,netbox_floorplan,netbox_interface_synchronization
+# from the same output, both in production and under wrangler dev. The plugins
+# listed in plugins.txt are enabled, so their static files are collected too.
 RUN SECRET_KEY=build-only-placeholder-not-a-secret-0123456789abcdefghijklmnopqrstuvwxyz \
     REDIS_TASKS_URL=redis://localhost:6379/0 \
     REDIS_CACHE_URL=redis://localhost:6379/1 \
     DB_HOST=localhost \
-    PLUGINS="$NETBOX_PLUGINS" \
     python netbox/manage.py collectstatic --no-input
 
 ############################
@@ -88,6 +86,7 @@ COPY --from=builder --chown=netbox:netbox /opt/netbox/netbox /opt/netbox/netbox
 COPY --chown=netbox:netbox deploy/cloudflare/gunicorn_config.py /opt/netbox/gunicorn_config.py
 COPY --chown=netbox:netbox deploy/cloudflare/entrypoint.sh /opt/netbox/entrypoint.sh
 COPY --chown=netbox:netbox deploy/cloudflare/supervisord.conf /opt/netbox/supervisord.conf
+COPY --chown=netbox:netbox deploy/cloudflare/plugins.txt /opt/netbox/plugins.txt
 COPY --chown=netbox:netbox deploy/cloudflare/bin/ /opt/netbox/bin/
 
 # Writable locations for the filesystem fallbacks (local testing without R2).

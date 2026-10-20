@@ -13,6 +13,7 @@
  */
 import { Container, type OutboundHandlerContext } from "@cloudflare/containers";
 import type { DurableObject } from "cloudflare:workers";
+import { BACKUP_PREFIX, isAdminAuthorized, scoped, staticAssetUrl } from "./lib";
 export { ContainerProxy } from "@cloudflare/containers";
 
 // Bindings and vars come from the generated worker-configuration.d.ts (`wrangler types`).
@@ -27,14 +28,12 @@ declare global {
     NETBOX_SUPERUSER_NAME?: string;
     NETBOX_SUPERUSER_EMAIL?: string;
     NETBOX_SUPERUSER_PASSWORD?: string;
+    // Optional override of the plugin list baked into the image (plugins.txt).
+    PLUGINS?: string;
     // Only used by the external-database roles (NETBOX_ROLE=web|worker).
     DATABASE_URL?: string;
     REDIS_TASKS_URL?: string;
     REDIS_CACHE_URL?: string;
-    R2_BUCKET?: string;
-    R2_ENDPOINT?: string;
-    R2_ACCESS_KEY_ID?: string;
-    R2_SECRET_ACCESS_KEY?: string;
     COOKIE_SECURE?: string;
     DB_SSLMODE?: string;
   }
@@ -58,10 +57,6 @@ const FORWARDED_ENV = [
   "DATABASE_URL",
   "REDIS_TASKS_URL",
   "REDIS_CACHE_URL",
-  "R2_BUCKET",
-  "R2_ENDPOINT",
-  "R2_ACCESS_KEY_ID",
-  "R2_SECRET_ACCESS_KEY",
   "COOKIE_SECURE",
   "DB_SSLMODE",
 ] as const;
@@ -69,7 +64,6 @@ const FORWARDED_ENV = [
 const WEB_PORT = 8001;
 const INSTANCE = "primary";
 const R2_HOST = "r2.internal";
-const BACKUP_PREFIX = "backup/";
 // First boot runs every migration; a restore replays WAL first. Both can take minutes.
 const STARTUP_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -250,12 +244,6 @@ async function r2Handler(request: Request, env: Env, _ctx: OutboundHandlerContex
   }
 }
 
-/** Confine every key to the backup prefix, with or without the prefix given. */
-function scoped(key: string): string {
-  const clean = key.replace(/^\/+/, "").replace(/\.\.(\/|$)/g, "");
-  return clean.startsWith(BACKUP_PREFIX) ? clean : BACKUP_PREFIX + clean;
-}
-
 function withForwardedProto(request: Request): Request {
   const headers = new Headers(request.headers);
   headers.set("X-Forwarded-Proto", "https");
@@ -273,7 +261,7 @@ export default {
     }
 
     if (url.pathname === "/__admin/restart") {
-      if (!env.ADMIN_TOKEN || request.headers.get("X-Admin-Token") !== env.ADMIN_TOKEN) {
+      if (!isAdminAuthorized(request, env.ADMIN_TOKEN)) {
         return new Response("forbidden", { status: 403 });
       }
       if (request.method !== "POST") return new Response("POST required", { status: 405 });
@@ -282,7 +270,7 @@ export default {
     }
 
     if (url.pathname === "/__admin/diag") {
-      if (!env.ADMIN_TOKEN || request.headers.get("X-Admin-Token") !== env.ADMIN_TOKEN) {
+      if (!isAdminAuthorized(request, env.ADMIN_TOKEN)) {
         return new Response("forbidden", { status: 403 });
       }
       const result = await env.NETBOX.getByName(INSTANCE).diagnostics();
@@ -293,9 +281,7 @@ export default {
     }
 
     if (url.pathname.startsWith("/static/")) {
-      const assetUrl = new URL(request.url);
-      assetUrl.pathname = url.pathname.slice("/static".length);
-      return env.ASSETS.fetch(new Request(assetUrl, request));
+      return env.ASSETS.fetch(new Request(staticAssetUrl(request.url), request));
     }
 
     return env.NETBOX.getByName(INSTANCE).fetch(withForwardedProto(request));

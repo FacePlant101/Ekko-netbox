@@ -40,7 +40,7 @@ Both container classes use the **same image** with different entrypoints.
 | --- | --- | --- |
 | PostgreSQL 14+ | Neon or Supabase (any provider with a public TLS endpoint) | Prefer a region close to where the container is likely to start. Use the provider's pooled endpoint, since each gunicorn worker and the RQ worker hold connections |
 | Redis 4+ | Upstash Redis (TLS, `rediss://`) | NetBox uses two logical DBs (tasks = 0, caching = 1). Upstash exposes one DB, so run two Upstash databases or one Redis Cloud instance with multiple DBs |
-| Object storage | Cloudflare R2, S3 API | `STORAGES["default"]` and `STORAGES["scripts"]` via `storages.backends.s3.S3Storage`. `django-storages` is already in `requirements.txt`; add `boto3` to the image |
+| Object storage | Cloudflare R2 | Used for backups only, through the Worker's R2 binding. Media and scripts stay on the container disk and ride along in every base backup (no S3 credentials in the container) |
 | Static files | Workers Static Assets | Built by `collectstatic` in CI, served by the Worker, never hits the container |
 
 ### Instance sizing
@@ -85,7 +85,7 @@ Durability model:
 
 | Event | Effect |
 | --- | --- |
-| Planned stop (deploy, idle) | SIGTERM: `pre-stop.sh` switches WAL and waits for it to archive; zero loss |
+| Planned stop (deploy, idle) | SIGTERM: the entrypoint stops gunicorn, rqworker and the backup loop first, then `pre-stop.sh` switches WAL and waits for it to archive, then Postgres stops; zero loss |
 | Crash / host restart | Lose the writes since the last archived segment: normally under 60 s (`archive_timeout`), up to about two minutes right after a restart because Postgres' first forced switch is measured from startup |
 | Next start | `pg-prepare.sh` restores the newest base backup from R2, replays archived WAL, promotes |
 | Media uploads, custom scripts | Tarred with each base backup (up to 6 h old after a crash) |
@@ -95,12 +95,23 @@ forced switches archive mostly empty 16 MB files. Recovery point: about 60 s. Re
 database size (seconds for a typical NetBox). This is a single-node database with
 no HA; see risks in section 4.
 
+Recovery is fail-safe against R2 errors: `wal-get.sh` returns "segment missing"
+to Postgres only on a definite 404 and otherwise retries for up to 15 minutes,
+then exits 126 so Postgres aborts recovery rather than promoting with WAL
+unapplied; `pg-prepare.sh` likewise refuses to start an empty cluster, or one
+without its media tarball, unless R2 answered 404. `pg-backup.sh` keeps the two
+newest base backups (each with a `START_WAL` marker) and prunes WAL only before
+the oldest retained one, so both stay restorable.
+
 Files: `bin/pg-prepare.sh` (restore or initdb), `bin/pg-backup.sh`,
-`bin/backup-loop.sh`, `bin/pre-stop.sh`, `bin/r2.sh` (curl wrapper for the
-handler), `bin/web.sh`, `bin/rqworker.sh`, `supervisord.conf`. The Worker's
-`r2Handler` confines all keys to the `backup/` prefix and requires
-`Content-Length` on uploads (R2 streams need a known length), so backups are
-written to local disk first and uploaded with `curl -T`.
+`bin/backup-loop.sh`, `bin/pre-stop.sh` and `bin/wait-archived.sh` (shared
+"switch WAL and wait for the archive" step), `bin/r2.sh` (curl wrapper for the
+handler), `bin/migrate.sh`, `bin/web.sh`, `bin/rqworker.sh` (waits for the
+`/tmp/migrations-done` sentinel that web.sh writes), `plugins.txt`,
+`supervisord.conf`. The Worker's `r2Handler` confines all keys to the `backup/`
+prefix (`src/lib.ts`, unit-tested with `npm test`) and requires `Content-Length`
+on uploads (R2 streams need a known length), so backups are written to local
+disk first and uploaded with `curl -T`.
 
 `enableInternet` is false and the R2 handler is the only egress. Do not add
 `allowedHosts` or `deniedHosts`: they switch the containers SDK to intercept-all
@@ -135,7 +146,7 @@ deploy/cloudflare/
 ### 2.1 Dockerfile
 
 - Base `python:3.12-slim`, multi-stage. Builder stage installs `gcc`, `libpq-dev`
-  for `psycopg[c]`, then `pip install -r requirements.txt boto3`. Runtime stage
+  for `psycopg[c]`, then `pip install -r requirements.txt -r plugin_requirements.txt`. Runtime stage
   copies the venv and `netbox/`, installs only `libpq5`.
 - Build with `--platform linux/amd64` (mandatory on Apple Silicon; the platform
   only runs amd64).
@@ -156,8 +167,8 @@ deploy/cloudflare/
 | `REDIS_TASKS_URL`, `REDIS_CACHE_URL` | `REDIS["tasks"]`, `REDIS["caching"]`, `SSL=True` |
 | `SECRET_KEY` | `SECRET_KEY` |
 | `ALLOWED_HOSTS` (comma list), `CSRF_TRUSTED_ORIGINS` | the same |
-| `R2_BUCKET`, `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | `STORAGES["default"]` and `STORAGES["scripts"]` S3 backends |
-| `BASE_PATH`, `TIME_ZONE`, `PLUGINS` (comma list) | optional passthrough |
+| `BASE_PATH`, `TIME_ZONE` | optional passthrough |
+| `PLUGINS` (comma list) | optional override; otherwise the list in `plugins.txt` baked into the image |
 
 `SECURE_PROXY_SSL_HEADER` and `USE_X_FORWARDED_HOST` are already set in
 `settings.py`, so the Worker only has to forward `X-Forwarded-Proto: https`.
@@ -211,8 +222,8 @@ Bootstrap tasks (first superuser, API token) are done once with
 }
 ```
 
-Secrets (`wrangler secret put`): `SECRET_KEY`, `DATABASE_URL`, `REDIS_TASKS_URL`,
-`REDIS_CACHE_URL`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `ADMIN_TOKEN`.
+Secrets (`wrangler secret put`): `SECRET_KEY`, `API_TOKEN_PEPPERS`, `ADMIN_TOKEN`,
+plus `DATABASE_URL`, `REDIS_TASKS_URL`, `REDIS_CACHE_URL` for the external-database roles.
 
 ### 2.5 src/index.ts (as implemented)
 
@@ -250,7 +261,9 @@ left in place (existing users are never modified).
 Stage the dump and optional media in R2 and restart the container; `bin/pg-import.sh`
 does the rest on boot (restore into a staging database, verify, swap, keep the old
 one as `netbox_previous`, unpack media, then NetBox's own migrations upgrade the
-schema). Only same-major dumps, or the last minor of the previous major (3.7.x for
+schema). If the import fails, the marker is renamed to `FAILED-<timestamp>` and
+the container keeps serving the current database; fix the staged files and
+create `READY` again. Only same-major dumps, or the last minor of the previous major (3.7.x for
 4.x), can be imported, per the NetBox upgrade rules.
 
 ```

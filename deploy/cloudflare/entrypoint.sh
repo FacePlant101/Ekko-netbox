@@ -12,13 +12,6 @@ cd /opt/netbox/netbox
 
 ROLE="${NETBOX_ROLE:-allinone}"
 
-run_migrations() {
-    echo "[entrypoint] applying database migrations"
-    python manage.py migrate --no-input
-    python manage.py remove_stale_contenttypes --no-input
-    python manage.py reindex --lazy
-}
-
 case "$ROLE" in
     allinone)
         export PGDATA="${PGDATA:-/opt/netbox/pgdata}"
@@ -37,7 +30,9 @@ case "$ROLE" in
         supervisord -c /opt/netbox/supervisord.conf &
         SUP=$!
         on_term() {
-            echo "[entrypoint] SIGTERM received, flushing WAL to R2 and shutting down"
+            echo "[entrypoint] SIGTERM received: stopping the application, flushing WAL to R2, shutting down"
+            # Stop writers first so the final WAL switch really is final.
+            supervisorctl -c /opt/netbox/supervisord.conf stop backup rqworker web >/dev/null 2>&1 || true
             /opt/netbox/bin/pre-stop.sh || true
             supervisorctl -c /opt/netbox/supervisord.conf shutdown >/dev/null 2>&1 || kill -TERM "$SUP"
         }
@@ -49,7 +44,7 @@ case "$ROLE" in
         ;;
     web)
         if [ "${SKIP_MIGRATIONS:-0}" != "1" ]; then
-            run_migrations
+            /opt/netbox/bin/migrate.sh
         fi
         echo "[entrypoint] starting gunicorn"
         exec gunicorn -c /opt/netbox/gunicorn_config.py netbox.wsgi
@@ -76,7 +71,7 @@ case "$ROLE" in
         exec python manage.py rqworker ${RQ_QUEUES:-high default low}
         ;;
     migrate)
-        run_migrations
+        /opt/netbox/bin/migrate.sh
         ;;
     manage)
         exec python manage.py "$@"

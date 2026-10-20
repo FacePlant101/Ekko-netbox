@@ -208,7 +208,18 @@ LOGIN_TIMEOUT = None
 
 METRICS_ENABLED = _env_bool('METRICS_ENABLED', False)
 
-PLUGINS = _env_list('PLUGINS')
+# Enabled plugins: the PLUGINS env var when set, otherwise the plugins.txt file
+# shipped in the image (one module name per line, '#' comments). The image build
+# reads the same file for collectstatic, so there is one list to maintain.
+def _plugins_from_file(path='/opt/netbox/plugins.txt'):
+    try:
+        with open(path) as fh:
+            return [line.strip() for line in fh if line.strip() and not line.lstrip().startswith('#')]
+    except OSError:
+        return []
+
+
+PLUGINS = _env_list('PLUGINS') or _plugins_from_file()
 PLUGINS_CONFIG = {}
 
 # Remote authentication via a trusted header. Pairs with Cloudflare Access when
@@ -225,31 +236,9 @@ RELEASE_CHECK_URL = None
 
 RQ_DEFAULT_TIMEOUT = _env_int('RQ_DEFAULT_TIMEOUT', 300)
 
-# Object storage. Container disk is wiped on every start, so uploads and custom
-# scripts go to an S3-compatible bucket (R2). Left unset, the defaults fall back
-# to the local filesystem, which is only suitable for local testing.
-_r2_bucket = _env('R2_BUCKET')
-if _r2_bucket:
-    _s3_options = {
-        'bucket_name': _r2_bucket,
-        'access_key': _require('R2_ACCESS_KEY_ID'),
-        'secret_key': _require('R2_SECRET_ACCESS_KEY'),
-        'endpoint_url': _require('R2_ENDPOINT'),
-        'region_name': _env('R2_REGION', 'auto'),
-        'default_acl': None,
-        'querystring_auth': True,
-        'signature_version': 's3v4',
-    }
-    STORAGES = {
-        'default': {
-            'BACKEND': 'storages.backends.s3.S3Storage',
-            'OPTIONS': {**_s3_options, 'location': 'media/'},
-        },
-        'scripts': {
-            'BACKEND': 'storages.backends.s3.S3Storage',
-            'OPTIONS': {**_s3_options, 'location': 'scripts/', 'file_overwrite': True},
-        },
-    }
+# Media and custom scripts stay on the container disk (defaults). The all-in-one
+# role includes them in every base backup and restores them on start, so no
+# object-storage credentials are needed in the container.
 
 TIME_ZONE = _env('TIME_ZONE', 'UTC')
 

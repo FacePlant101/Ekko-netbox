@@ -24,7 +24,20 @@ NAME=$(printf '%s' "$NAME" | tr -d '[:space:]')
 [ -n "$NAME" ] || exit 0
 
 echo "[pg-import] importing $NAME into a staging database"
-mkdir -p "$WORK"; trap 'rm -rf "$WORK"' EXIT
+mkdir -p "$WORK"
+# On any failure after this point, mark the staged import FAILED so the next
+# start does not retry it and web.sh can go on serving the current database.
+on_exit() {
+    rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "[pg-import] import of $NAME failed (exit $rc); marking it FAILED-$TS" >&2
+        printf '%s %s exit=%s' "$TS" "$NAME" "$rc" > "$WORK/FAILED"
+        $R2 put "$BACKUP_PREFIX/import/FAILED-$TS" "$WORK/FAILED" || true
+        $R2 del "$BACKUP_PREFIX/import/READY" || true
+    fi
+    rm -rf "$WORK"
+}
+trap on_exit EXIT
 $R2 get "$BACKUP_PREFIX/import/$NAME" "$WORK/$NAME"
 
 $PSQL -d postgres -Atc "select pg_terminate_backend(pid) from pg_stat_activity where datname='netbox_import' and pid<>pg_backend_pid()" >/dev/null || true
