@@ -31,6 +31,14 @@ netbox.pid
 .coverage
 .vscode
 .python-version
+
+# Cloudflare deployment tooling
+/deploy/cloudflare/node_modules
+/deploy/cloudflare/.wrangler
+/deploy/cloudflare/worker-configuration.d.ts
+/deploy/cloudflare/.dev.vars
+
+# Local environment files (secrets)
 .env
 .env.*
 !.env.example
