@@ -31,3 +31,6 @@ netbox.pid
 .coverage
 .vscode
 .python-version
+.env
+.env.*
+!.env.example
