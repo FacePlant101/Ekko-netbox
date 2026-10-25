@@ -80,6 +80,7 @@ AUTH_PASSWORD_VALIDATORS = getattr(configuration, 'AUTH_PASSWORD_VALIDATORS', [
     },
 ])
 BASE_PATH = trailing_slash(getattr(configuration, 'BASE_PATH', ''))
+BRANCH_ONLY_USERS = getattr(configuration, 'BRANCH_ONLY_USERS', [])
 CHANGELOG_SKIP_EMPTY_CHANGES = getattr(configuration, 'CHANGELOG_SKIP_EMPTY_CHANGES', True)
 CENSUS_REPORTING_ENABLED = getattr(configuration, 'CENSUS_REPORTING_ENABLED', True)
 CORS_ORIGIN_ALLOW_ALL = getattr(configuration, 'CORS_ORIGIN_ALLOW_ALL', False)
