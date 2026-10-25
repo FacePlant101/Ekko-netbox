@@ -1,0 +1,10 @@
+# NetBox plugin module names to enable, one per line. This is the single source
+# of truth: configuration.py reads it at runtime (unless PLUGINS is set in the
+# environment) and the image build reads it for collectstatic. Packages are
+# installed from plugin_requirements.txt.
+netbox_documents
+netbox_topology_views
+netbox_floorplan
+netbox_interface_synchronization
+# netbox_branching must stay last (configuration.py also enforces this).
+netbox_branching
