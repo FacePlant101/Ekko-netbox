@@ -45,19 +45,34 @@ Both container classes use the **same image** with different entrypoints.
 
 ### Instance sizing
 
-NetBox with gunicorn (3 workers x 3 threads) comfortably needs 1.5 to 2.5 GiB.
-Start with:
+Memory and disk are billed on the *provisioned* size for every second the
+container runs (CPU only on active use), and the all-in-one container runs around
+the clock. Size it to the measured footprint, not to a comfortable named type.
+
+Measured locally (empty database, all plugins, after loading the main list,
+add and plugin pages): each gunicorn worker is about 450 MB RSS, rqworker about
+400 MB, Postgres, Redis and supervisord together under 150 MB. Three
+independently loaded workers came to about 1.9 GB in total (PSS); two workers
+preloaded in the gunicorn master share the code and come to about 1.3 GB, which
+leaves room for real data and large exports in 3 GiB.
 
 | Class | Instance type | Why |
 | --- | --- | --- |
-| `NetBox` (all-in-one, deployed) | `standard-2` (1 vCPU, 6 GiB, 12 GB disk) | Postgres (512 MB shared buffers), Redis, gunicorn and rqworker together; disk holds the database plus one base backup in flight |
+| `NetBox` (all-in-one, deployed) | custom: 1 vCPU, 3 GiB, 6 GB disk | Postgres (256 MB shared buffers), Redis (128 MB cap), 2 preloaded gunicorn workers x 4 threads and rqworker; disk holds the ~1.4 GB image, the database and one base backup in flight |
 | `NetBoxWeb` (external DB layout) | `standard-1` (1/2 vCPU, 4 GiB, 8 GB disk) | Headroom for migrations and large table exports |
 | `NetBoxWorker` (external DB layout) | `basic` (1/4 vCPU, 1 GiB) | Idle most of the time |
 
-Requires the Workers Paid plan. Rough steady-state cost at 1 web instance running
-24h: ~0.5 vCPU x 730 h plus 4 GiB x 730 h of memory, on the order of USD 30 to 40
-per month plus the external Postgres and Redis. Letting the web container sleep
-outside working hours cuts this proportionally.
+1 vCPU / 3 GiB is the smallest custom type (custom types need at least 1 vCPU and
+3 GiB per vCPU, and allow at most 2 GB of disk per GiB). If the container is
+OOM-killed under real load, raise `memory_mib` (and `disk_mb` with it) before
+adding workers.
+
+Requires the Workers Paid plan. Steady-state cost of the all-in-one container
+running 730 h a month: 3 GiB of memory is about USD 19.50 (USD 0.0000025 per
+GiB-second after 25 included GiB-hours), 6 GB of disk about USD 1, CPU usually
+within the 375 included vCPU-minutes. The previous `standard-2` (6 GiB, 12 GB)
+cost about USD 41 for the same hours. Letting the container sleep outside working
+hours cuts this proportionally, at the price of a restore from R2 on every wake.
 
 ## 1a. All-on-Cloudflare layout (deployed)
 
@@ -68,7 +83,7 @@ is made durable with Postgres' own archiving, written to R2 through the Worker:
 ```
 Internet ──> Worker (netbox)
                ├── /static/*  ──> Workers Static Assets
-               └── /*         ──> NetBox container (standard-2, singleton)
+               └── /*         ──> NetBox container (1 vCPU / 3 GiB, singleton)
              Cron (*/5)       ──> keepAlive(): container never idles out
 
 NetBox container (supervisord):

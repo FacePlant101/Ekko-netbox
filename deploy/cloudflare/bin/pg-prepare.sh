@@ -71,8 +71,8 @@ archive_command = '/opt/netbox/bin/wal-put.sh %p %f'
 archive_timeout = ${PG_ARCHIVE_TIMEOUT:-60}
 max_wal_senders = 3
 wal_keep_size = 256MB
-shared_buffers = ${PG_SHARED_BUFFERS:-512MB}
-effective_cache_size = 2GB
+shared_buffers = ${PG_SHARED_BUFFERS:-256MB}
+effective_cache_size = 1GB
 log_min_messages = warning
 log_checkpoints = off
 CONF
