@@ -61,7 +61,7 @@ On the VM, in `/opt/netbox-oci/deploy/oci`, create `.env`, `netbox.env`,
 For the trial run, add the trial hostname too:
 
 ```
-ALLOWED_HOSTS=netbox.lydfirmaetekko.no,netbox-oci.lydfirmaetekko.no
+ALLOWED_HOSTS=netbox.lydfirmaetekko.no,netbox-oci.lydfirmaetekko.no,localhost,127.0.0.1
 CSRF_TRUSTED_ORIGINS=https://netbox.lydfirmaetekko.no,https://netbox-oci.lydfirmaetekko.no
 ```
 

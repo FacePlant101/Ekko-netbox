@@ -18,7 +18,8 @@ tar -czf "$WORK/media.tar.gz" -C /data media scripts
 ls -l "$WORK" | awk 'NR>1 {print "[backup]", $5, "bytes", $NF}'
 
 rclone copy "$WORK" "$BASE/$TS"
-printf '%s' "$TS" | rclone rcat "$BASE/LATEST"
+printf '%s' "$TS" > "$WORK/LATEST"
+rclone copyto "$WORK/LATEST" "$BASE/LATEST"
 echo "[backup] published $BACKUP_PREFIX/$TS"
 
 rclone lsf --dirs-only "$BASE/" | sed 's#/$##' | sort | head -n -"$BACKUPS_TO_KEEP" | while read -r old; do
