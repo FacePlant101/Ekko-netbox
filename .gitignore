@@ -37,3 +37,9 @@ netbox.pid
 /deploy/cloudflare/.wrangler
 /deploy/cloudflare/worker-configuration.d.ts
 /deploy/cloudflare/.dev.vars
+
+# OCI deployment secrets (templates in deploy/oci/env.example)
+/deploy/oci/.env
+/deploy/oci/netbox.env
+/deploy/oci/tunnel.env
+/deploy/oci/backup.env

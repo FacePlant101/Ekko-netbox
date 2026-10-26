@@ -1,0 +1,29 @@
+#cloud-config
+# First-boot setup for the NetBox VM (Ubuntu 24.04, arm64). provision.sh replaces
+# __REPO_URL__ and __REPO_BRANCH__. The stack is not started here: the env files
+# holding secrets are copied over afterwards (see README.md).
+package_update: true
+package_upgrade: true
+packages:
+  - ca-certificates
+  - curl
+  - git
+
+runcmd:
+  # OCI's Ubuntu images reject forwarded packets in the persisted iptables rules,
+  # which breaks container networking whenever the rules are reloaded.
+  - sed -i '/-A FORWARD -j REJECT/d' /etc/iptables/rules.v4
+  - netfilter-persistent reload || true
+  # Docker Engine and the Compose plugin from Docker's repository (Ubuntu's
+  # compose is too old for build additional_contexts with service: references).
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=arm64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" > /etc/apt/sources.list.d/docker.list
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - usermod -aG docker ubuntu
+  - git clone --branch __REPO_BRANCH__ --depth 1 __REPO_URL__ /opt/netbox-oci
+  - chown -R ubuntu:ubuntu /opt/netbox-oci
+  - cp /opt/netbox-oci/deploy/oci/systemd/netbox-backup.service /opt/netbox-oci/deploy/oci/systemd/netbox-backup.timer /etc/systemd/system/
+  - systemctl daemon-reload
+  - systemctl enable --now netbox-backup.timer

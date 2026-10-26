@@ -1,0 +1,130 @@
+# NetBox on an OCI Ampere (arm64) VM. See README.md.
+# Run from this directory: `docker compose up -d --build`.
+#
+#   cloudflared (Cloudflare Tunnel) -> nginx (/static from the image) -> netbox (gunicorn)
+#                                                                          |-> postgres, redis
+#   worker (rqworker)  --------------------------------------------------> postgres, redis
+#
+# Nothing listens on the VM's public interface: the tunnel connects outbound.
+
+x-netbox: &netbox
+  # The same image as the Cloudflare deployment; NETBOX_ROLE picks web or worker.
+  image: netbox-ekko:local
+  restart: unless-stopped
+  env_file: netbox.env
+  environment: &netbox-env
+    DATABASE_URL: postgres://netbox:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/netbox
+    DB_SSLMODE: disable
+    REDIS_TASKS_URL: redis://redis:6379/0
+    REDIS_CACHE_URL: redis://redis:6379/1
+  volumes:
+    - media:/opt/netbox/netbox/media
+    - scripts:/opt/netbox/netbox/scripts
+    - reports:/opt/netbox/netbox/reports
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_started
+
+services:
+  netbox:
+    <<: *netbox
+    build:
+      context: ../..
+      dockerfile: deploy/cloudflare/Dockerfile
+    environment:
+      <<: *netbox-env
+      NETBOX_ROLE: web
+      # 4 OCPU / 24 GB is free on A1; the VM is sized 2 / 12, so three workers fit easily.
+      GUNICORN_WORKERS: "3"
+
+  worker:
+    <<: *netbox
+    # Built by the netbox service; never pulled.
+    pull_policy: never
+    environment:
+      <<: *netbox-env
+      NETBOX_ROLE: worker
+    # The image's healthcheck probes gunicorn; the worker role serves a marker on 8002.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8002/ok"]
+      interval: 30s
+      timeout: 5s
+      start_period: 300s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      netbox:
+        condition: service_started
+
+  postgres:
+    image: postgres:17.11-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: netbox
+      POSTGRES_DB: netbox
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # Same collation as the Cloudflare cluster, so text indexes sort identically.
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C.UTF-8
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "netbox", "-d", "netbox"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4.11-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata:/data
+
+  nginx:
+    build:
+      context: nginx
+      additional_contexts:
+        app: service:netbox
+    image: netbox-ekko-nginx:local
+    restart: unless-stopped
+    depends_on:
+      netbox:
+        condition: service_started
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.2
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run"]
+    env_file: tunnel.env
+    depends_on:
+      nginx:
+        condition: service_started
+
+  # Not a long-running service: the systemd timer runs `docker compose run --rm backup`.
+  backup:
+    build: backup
+    image: netbox-ekko-backup:local
+    profiles: ["tools"]
+    env_file: backup.env
+    environment:
+      PGHOST: postgres
+      PGUSER: netbox
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      PGDATABASE: netbox
+    volumes:
+      - media:/data/media
+      - scripts:/data/scripts
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
+  media:
+  scripts:
+  reports:

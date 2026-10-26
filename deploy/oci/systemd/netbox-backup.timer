@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly NetBox backup to Cloudflare R2
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 Europe/Oslo
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

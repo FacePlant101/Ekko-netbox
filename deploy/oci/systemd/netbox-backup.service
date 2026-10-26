@@ -1,0 +1,9 @@
+[Unit]
+Description=Back up NetBox to Cloudflare R2
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/netbox-oci/deploy/oci
+ExecStart=/usr/bin/docker compose run --rm backup
