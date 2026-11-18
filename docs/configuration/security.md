@@ -37,6 +37,30 @@ Although it is not recommended, the default validation rules can be disabled by 
 
 ---
 
+## BRANCH_ONLY_USERS
+
+Default: `[]` (disabled)
+
+A list of usernames which may modify data only within a [NetBox Branching](https://github.com/netboxlabs/netbox-branching) branch, never in main. This is intended for automation accounts (for example, an API token used by an AI agent), where object permissions alone cannot express "only in branches".
+
+```python
+BRANCH_ONLY_USERS = ['claude-mcp']
+```
+
+For these users, any create, update, delete, or many-to-many change (e.g. tag assignment) to a change-logged model is refused unless a branch is active for the request (via the `X-NetBox-Branch` header, or the branch selector in the UI) *and* the write is routed to that branch's schema. The request fails with HTTP 400 in the REST API and an error message in the UI. In practice, these users:
+
+* **Can** create, sync, and edit branches (models of the `netbox_branching` app are exempt), and change any branch-aware object while a branch is active.
+* **Cannot** change anything in main, merge or revert a branch (both write to main), or change models which netbox-branching exempts from branching, such as custom fields, custom links, export templates, saved filters, event rules, and webhooks; these are always written to main, even while a branch is active.
+
+The user is taken from the HTTP request or background job which initiated the change. Jobs requested by a restricted user (e.g. a merge or a custom script) are therefore checked too, while other users, including those merging branches containing changes made by a restricted user, are unaffected. Writes made outside a request or job (e.g. management commands) are not checked.
+
+The guard is implemented as `pre_save`, `pre_delete`, and `m2m_changed` signal receivers (`extras/branch_guard.py`). The REST API and UI create, edit, and delete objects through model `save()` and `delete()` and are covered; code which bypasses model signals (queryset `update()` or `bulk_create()`, e.g. in a custom script) is not.
+
+!!! note
+    This check complements object permissions; it does not replace them. Grant the user only the permissions it needs, as usual.
+
+---
+
 ## CORS_ORIGIN_ALLOW_ALL
 
 Default: `False`
