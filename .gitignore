@@ -37,3 +37,8 @@ netbox.pid
 /deploy/cloudflare/.wrangler
 /deploy/cloudflare/worker-configuration.d.ts
 /deploy/cloudflare/.dev.vars
+
+# Local environment files (secrets)
+.env
+.env.*
+!.env.example
