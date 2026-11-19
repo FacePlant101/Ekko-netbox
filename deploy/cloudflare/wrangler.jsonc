@@ -71,6 +71,8 @@
     // a PLUGINS var here would override that list.
     // Base backup cadence; WAL is archived at least every 60 s regardless.
     "BACKUP_INTERVAL_SECONDS": "21600",
+    // Users which may only change data inside a NetBox Branching branch (comma list).
+    "BRANCH_ONLY_USERS": "claude-mcp",
     "TIME_ZONE": "Europe/Oslo"
   }
 }

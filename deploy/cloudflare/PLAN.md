@@ -168,6 +168,7 @@ deploy/cloudflare/
 | `SECRET_KEY` | `SECRET_KEY` |
 | `ALLOWED_HOSTS` (comma list), `CSRF_TRUSTED_ORIGINS` | the same |
 | `BASE_PATH`, `TIME_ZONE` | optional passthrough |
+| `BRANCH_ONLY_USERS` (comma list) | users confined to NetBox Branching branches (`claude-mcp`) |
 | `PLUGINS` (comma list) | optional override; otherwise the list in `plugins.txt` baked into the image |
 | `BRANCHING_PROVISION_WORKERS` | netbox-branching `provision_workers`, default 1 (single vCPU) |
 

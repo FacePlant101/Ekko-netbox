@@ -180,6 +180,9 @@ AUTH_PASSWORD_VALIDATORS = [
 
 BASE_PATH = _env('BASE_PATH', '')
 
+# Users which may only change data inside a NetBox Branching branch (e.g. the MCP server's API user)
+BRANCH_ONLY_USERS = _env_list('BRANCH_ONLY_USERS')
+
 CORS_ORIGIN_ALLOW_ALL = _env_bool('CORS_ORIGIN_ALLOW_ALL', False)
 CORS_ORIGIN_WHITELIST = _env_list('CORS_ORIGIN_WHITELIST')
 CORS_ORIGIN_REGEX_WHITELIST = []
